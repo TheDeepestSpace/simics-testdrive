@@ -23,7 +23,8 @@ jobs:
       - name: Build modules + firmware and run simulation
         run: |
           set -o pipefail
-          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+          chmod -R a+rwX "$PWD"
+          docker run --rm \
             -v "$PWD":/workspaces/simics-testdrive -w /workspaces/simics-testdrive \
             simics-testdrive bash scripts/run.sh 2>&1 | tee sim.log
 
