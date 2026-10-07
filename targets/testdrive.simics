@@ -1,0 +1,26 @@
+# Bare-metal RISC-V board + toy I2C master (MMIO) and slave on an i2c-link-v2.
+# Build first: make toy-i2c-master toy-i2c-slave && make -C firmware
+# Run:         ./simics targets/testdrive.simics
+
+load-module toy-i2c-master
+load-module toy-i2c-slave
+load-module i2c-link-v2
+
+load-target "risc-v-simple/bare-metal" namespace = machine machine:software:bare_metal:image = "%simics%/firmware/firmware.elf"
+
+# Devices: master at 0x10100000, sensor at I2C address 0x42
+@master = SIM_create_object("toy_i2c_master", "board.i2c_master", [])
+@sensor = SIM_create_object("toy_i2c_slave", "board.i2c_sensor", [["address", 0x42]])
+board.phys_mem.add-map board.i2c_master.bank.regs 0x10100000 0x1000
+
+# Wire both through an I2C link (link object + one endpoint per device)
+@link = SIM_create_object("i2c-link-impl", "i2c_link", [["goal_latency", 1e-6]])
+@ep_m = SIM_create_object("i2c-link-endpoint", "i2c_ep_master", [["link", link], ["device", master], ["id", 1]])
+@ep_s = SIM_create_object("i2c-link-endpoint", "i2c_ep_sensor", [["link", link], ["device", sensor], ["id", 2]])
+@master.attr.i2c_link_v2 = ep_m
+@sensor.attr.i2c_link_v2 = ep_s
+
+# Show everything the sensor sees on the bus
+board.i2c_sensor.log-level 2
+
+run-seconds 0.01

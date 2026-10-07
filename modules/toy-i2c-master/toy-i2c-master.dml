@@ -1,0 +1,79 @@
+dml 1.4;
+
+device toy_i2c_master;
+param desc = "toy memory-mapped I2C master";
+param documentation = "Minimal polled I2C master controller. Registers"
+    + " (32-bit): 0x00 DATA (write: byte to send / START address byte;"
+    + " read: last byte received), 0x04 CMD (1=START, 2=WRITE, 3=READ,"
+    + " 4=STOP; writing starts the operation), 0x08 STATUS"
+    + " (bit0 BUSY, bit1 NACK, bit2 DONE; write 1s to clear NACK/DONE).";
+
+import "utility.dml";
+import "simics/devs/i2c.dml";
+
+loggroup lg_i2c;
+
+connect i2c_link_v2 {
+    param desc = "I2C link connection";
+    param configuration = "optional";
+    interface i2c_slave_v2;
+}
+
+bank regs {
+    param register_size = 4;
+    param byte_order = "little-endian";
+
+    register data @ 0x00 "DATA";
+    register cmd @ 0x04 "CMD" {
+        param init_val = 0;
+        method write_register(uint64 value, uint64 enabled_bytes, void *aux) {
+            if (status.busy.val == 1) {
+                log spec_viol, 1, lg_i2c: "command while BUSY ignored";
+                return;
+            }
+            status.nack.val = 0;
+            status.done.val = 0;
+            status.busy.val = 1;
+            switch (value) {
+            case 1:
+                i2c_link_v2.i2c_slave_v2.start(data.val);
+                break;
+            case 2:
+                i2c_link_v2.i2c_slave_v2.write(data.val);
+                break;
+            case 3:
+                i2c_link_v2.i2c_slave_v2.read();
+                break;
+            case 4:
+                i2c_link_v2.i2c_slave_v2.stop();
+                status.busy.val = 0;
+                status.done.val = 1;
+                break;
+            default:
+                log spec_viol, 1, lg_i2c: "unknown command %d", value;
+                status.busy.val = 0;
+            }
+        }
+        method read_register(uint64 enabled_bytes, void *aux) -> (uint64) {
+            return 0;
+        }
+    }
+    register status @ 0x08 "STATUS" {
+        field busy @ [0:0] is (read_only);
+        field nack @ [1:1] is (write_1_clears);
+        field done @ [2:2] is (write_1_clears);
+    }
+}
+
+implement i2c_master_v2 {
+    method acknowledge(i2c_ack_t ack) {
+        regs.status.nack.val = ack == I2C_noack ? 1 : 0;
+        regs.status.busy.val = 0;
+        regs.status.done.val = 1;
+    }
+    method read_response(uint8 value) {
+        regs.data.val = value;
+        regs.status.busy.val = 0;
+        regs.status.done.val = 1;
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "simics-testdrive",
+  "build": { "dockerfile": "Dockerfile" },
+  "remoteUser": "dev",
+  "postCreateCommand": "scripts/setup-project.sh",
+  "postStartCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh"
+      },
+      "extensions": ["ms-vscode.cpptools"]
+    }
+  }
+}

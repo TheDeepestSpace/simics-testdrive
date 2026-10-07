@@ -1,0 +1,96 @@
+dml 1.4;
+
+device toy_i2c_slave;
+param desc = "toy I2C register-file slave";
+param documentation = "A minimal I2C slave with a register pointer. The first"
+    + " byte written after START selects a register; further writes store to"
+    + " it and every access auto-increments the pointer. Registers:"
+    + " 0x00 WHO_AM_I (RO, 0xA5), 0x01 SCRATCH (RW),"
+    + " 0x02 COUNTER (RO, increments on every read), 0x03 LAST_WRITE (RO).";
+
+import "simics/devs/i2c.dml";
+
+loggroup lg_i2c;
+
+connect i2c_link_v2 {
+    param desc = "I2C link connection";
+    param configuration = "optional";
+    interface i2c_master_v2;
+}
+
+attribute address is uint64_attr {
+    param documentation = "7-bit address on the I2C bus.";
+    param init_val = 0x42;
+    method set(attr_value_t val) throws {
+        if (SIM_attr_integer(val) > 127) {
+            SIM_c_attribute_error("address %llu outside [0, 127]",
+                                  SIM_attr_integer(val));
+            throw;
+        }
+        default(val);
+    }
+}
+
+saved uint8 reg_ptr;
+saved bool have_ptr;
+saved uint8 scratch;
+saved uint8 counter;
+saved uint8 last_write;
+
+
+method reg_read(uint8 r) -> (uint8) {
+    switch (r) {
+    case 0x00: return 0xA5;
+    case 0x01: return scratch;
+    case 0x02: return counter++;
+    case 0x03: return last_write;
+    default:
+        log spec_viol, 1, lg_i2c: "read of unmapped register 0x%02x", r;
+        return 0xFF;
+    }
+}
+
+method reg_write(uint8 r, uint8 v) {
+    switch (r) {
+    case 0x01: scratch = v; break;
+    default:
+        log spec_viol, 1, lg_i2c: "write of RO/unmapped register 0x%02x", r;
+    }
+}
+
+implement i2c_slave_v2 {
+    method start(uint8 addr) {
+        local bool match = addr[7:1] == address.val;
+        log info, 3, lg_i2c: "START addr=0x%02x: %s", addr,
+            match ? "ACK" : "NACK";
+        have_ptr = false;
+        i2c_link_v2.i2c_master_v2.acknowledge(match ? I2C_ack : I2C_noack);
+    }
+    method write(uint8 value) {
+        last_write = value;
+        if (!have_ptr) {
+            reg_ptr = value;
+            have_ptr = true;
+            log info, 3, lg_i2c: "register pointer = 0x%02x", value;
+        } else {
+            log info, 2, lg_i2c: "write reg 0x%02x = 0x%02x", reg_ptr, value;
+            reg_write(reg_ptr, value);
+            reg_ptr++;
+        }
+        i2c_link_v2.i2c_master_v2.acknowledge(I2C_ack);
+    }
+    method read() {
+        local uint8 v = reg_read(reg_ptr);
+        log info, 2, lg_i2c: "read reg 0x%02x -> 0x%02x", reg_ptr, v;
+        reg_ptr++;
+        i2c_link_v2.i2c_master_v2.read_response(v);
+    }
+    method stop() {
+        log info, 3, lg_i2c: "STOP";
+    }
+    method addresses() -> (attr_value_t) {
+        return SIM_make_attr_list(2,
+            SIM_make_attr_uint64(address.val << 1),
+            SIM_make_attr_uint64(address.val << 1 | 1));
+    }
+}
